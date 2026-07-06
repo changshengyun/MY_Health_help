@@ -1,0 +1,9 @@
+node_modules/
+app/.npm-cache/
+dist/
+app/client/dist/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+*.log

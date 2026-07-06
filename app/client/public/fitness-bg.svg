@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 420" role="img" aria-label="Fitness dashboard background">
+  <rect width="1400" height="420" fill="#1f5d42"/>
+  <path d="M0 320 C160 250 280 255 430 300 C610 354 760 240 930 278 C1100 316 1230 256 1400 200 L1400 420 L0 420 Z" fill="#2f7d57"/>
+  <path d="M0 250 C170 205 340 200 520 230 C710 263 900 210 1080 170 C1210 140 1310 150 1400 175 L1400 420 L0 420 Z" fill="#315f83" opacity="0.58"/>
+  <g opacity="0.24" fill="none" stroke="#fffdf8" stroke-width="18" stroke-linecap="round">
+    <path d="M1040 120 h170"/>
+    <path d="M1075 82 v76"/>
+    <path d="M1175 82 v76"/>
+    <path d="M1010 98 v44"/>
+    <path d="M1240 98 v44"/>
+  </g>
+  <g opacity="0.16" fill="#fffdf8">
+    <circle cx="165" cy="105" r="74"/>
+    <rect x="250" y="70" width="310" height="26" rx="8"/>
+    <rect x="250" y="120" width="230" height="18" rx="8"/>
+    <rect x="250" y="158" width="270" height="18" rx="8"/>
+  </g>
+</svg>
