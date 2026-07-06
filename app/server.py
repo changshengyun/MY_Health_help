@@ -353,6 +353,60 @@ def get_stats(conn, target_date):
     }
 
 
+def get_recovery(conn, target_date):
+    end = date.fromisoformat(target_date)
+    start = end - timedelta(days=6)
+    start_text = start.isoformat()
+    end_text = end.isoformat()
+    summary = conn.execute(
+        """
+        SELECT
+            COALESCE(SUM(duration_minutes), 0) AS total_minutes,
+            AVG(rpe) AS average_rpe
+        FROM workout_logs
+        WHERE date BETWEEN ? AND ?
+        """,
+        (start_text, end_text),
+    ).fetchone()
+    high_rpe_days = conn.execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM (
+            SELECT date
+            FROM workout_logs
+            WHERE date BETWEEN ? AND ?
+            GROUP BY date
+            HAVING MAX(rpe) >= 8
+        )
+        """,
+        (start_text, end_text),
+    ).fetchone()["count"]
+
+    total_minutes = int(summary["total_minutes"] or 0)
+    average_rpe = round(float(summary["average_rpe"] or 0), 1)
+
+    if total_minutes >= 360 or average_rpe >= 8 or high_rpe_days >= 3:
+        risk_level = "high"
+        advice = "过去 7 天训练负荷偏高，建议今天安排休息、拉伸或低强度有氧，并优先保证睡眠和补水。"
+    elif total_minutes >= 180 or average_rpe >= 6.5 or high_rpe_days >= 1:
+        risk_level = "medium"
+        advice = "过去 7 天训练负荷中等，建议保留训练但降低强度，避免连续高 RPE 训练。"
+    else:
+        risk_level = "low"
+        advice = "过去 7 天训练负荷较低，恢复风险不高，可以按计划训练，并逐步增加训练量。"
+
+    return {
+        "date": end_text,
+        "window_start": start_text,
+        "window_end": end_text,
+        "total_minutes": total_minutes,
+        "average_rpe": average_rpe,
+        "high_rpe_days": high_rpe_days,
+        "risk_level": risk_level,
+        "advice": advice,
+    }
+
+
 def build_summary(workout_days, completion_rate, meal_rows, body_rows):
     parts = []
     if completion_rate >= 75:
@@ -446,6 +500,9 @@ class FitnessHandler(SimpleHTTPRequestHandler):
                 if path == "/api/stats":
                     target = query.get("date", [date.today().isoformat()])[0]
                     return self.send_json(get_stats(conn, target))
+                if path == "/api/recovery":
+                    target = query.get("date", [date.today().isoformat()])[0]
+                    return self.send_json(get_recovery(conn, target))
                 if path == "/api/dashboard":
                     target = query.get("date", [date.today().isoformat()])[0]
                     week_start, week_end = week_bounds(target)

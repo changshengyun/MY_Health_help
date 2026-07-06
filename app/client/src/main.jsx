@@ -1,15 +1,82 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { MEAL_TEMPLATES, SHOPPING_LIST } from "./extensionData.js";
 import "./styles.css";
 
 const initialDate = "2026-07-06";
+
 const views = [
   ["dashboard", "总览"],
   ["plans", "分周计划"],
   ["checkin", "每日打卡"],
   ["meals", "饮食分析"],
   ["workouts", "训练记录"],
+  ["coach", "专业扩展"],
   ["stats", "后台统计"]
+];
+
+const agentWorkflow = [
+  {
+    name: "总 A",
+    role: "任务分发与总体验收",
+    status: "整合中",
+    standard: "拆分边界、收集结果、跑构建和浏览器验收"
+  },
+  {
+    name: "A1",
+    role: "训练恢复",
+    status: "已接入",
+    standard: "恢复 API 返回 7 天训练负荷、RPE 和风险建议"
+  },
+  {
+    name: "A2",
+    role: "营养模板",
+    status: "已接入",
+    standard: "餐食模板不少于 6 个，采购清单分组清晰"
+  },
+  {
+    name: "A3",
+    role: "视觉体验",
+    status: "已接入",
+    standard: "新增扩展卡片、模板卡片、Agent 看板样式"
+  },
+  {
+    name: "A4",
+    role: "验收文档",
+    status: "已完成",
+    standard: "记录多 Agent 工作流和验收清单"
+  }
+];
+
+const professionalExtensions = [
+  {
+    id: "recovery",
+    title: "训练恢复与负荷建议",
+    owner: "A1 训练 Agent",
+    goal: "防止新手恢复期训练过猛，用 7 天训练分钟数和 RPE 判断恢复风险。",
+    acceptance: "页面显示总训练分钟、平均 RPE、高 RPE 天数、风险等级和建议。"
+  },
+  {
+    id: "meal-template",
+    title: "减脂餐模板与购物清单",
+    owner: "A2 营养 Agent",
+    goal: "把鸡蛋、鱼肉、瘦肉、米饭、小米粥、土豆、茄子、青菜等常见食材组合成可执行餐单。",
+    acceptance: "页面展示不少于 6 个餐食模板，并按蛋白质、蔬菜、主食、控零食分组展示采购建议。"
+  },
+  {
+    id: "body-target",
+    title: "身体围度与阶段目标",
+    owner: "总 A 整合",
+    goal: "减脂不只看体重，同时跟踪腰围、大腿围、训练频率和阶段目标。",
+    acceptance: "页面给出腰围、体重、训练频率、当前阶段的目标卡片。"
+  },
+  {
+    id: "phase-review",
+    title: "阶段复盘与教练建议",
+    owner: "A4 验收 Agent",
+    goal: "把训练、饮食、打卡数据变成每周复盘，让用户知道下一步该控什么。",
+    acceptance: "页面展示基于真实数据的本周复盘和下一步执行建议。"
+  }
 ];
 
 async function api(path, options = {}) {
@@ -18,7 +85,9 @@ async function api(path, options = {}) {
     ...options
   });
   const data = await response.json();
-  if (!response.ok || data.error) throw new Error(data.error || "请求失败");
+  if (!response.ok || data.error) {
+    throw new Error(data.error || "请求失败");
+  }
   return data;
 }
 
@@ -30,6 +99,19 @@ function mealLabel(type) {
   return { breakfast: "早餐", lunch: "午餐", dinner: "晚餐", snack: "加餐" }[type] || type;
 }
 
+function categoryLabel(type) {
+  return {
+    protein: "优质蛋白",
+    vegetable: "蔬菜纤维",
+    carb: "可控主食",
+    snackControl: "控零食"
+  }[type] || type;
+}
+
+function riskLabel(level) {
+  return { low: "低风险", medium: "中等风险", high: "高风险" }[level] || "未评估";
+}
+
 function App() {
   const [activeView, setActiveView] = useState("dashboard");
   const [currentDate, setCurrentDate] = useState(initialDate);
@@ -39,16 +121,18 @@ function App() {
   const [meals, setMeals] = useState([]);
   const [workouts, setWorkouts] = useState([]);
   const [stats, setStats] = useState(null);
+  const [recovery, setRecovery] = useState(null);
   const [toast, setToast] = useState("");
 
   async function loadAll(date = currentDate) {
-    const [dashboardData, planData, checkin, mealData, workoutData, statData] = await Promise.all([
+    const [dashboardData, planData, checkin, mealData, workoutData, statData, recoveryData] = await Promise.all([
       api(`/api/dashboard?date=${date}`),
       api("/api/plans"),
       api(`/api/checkins/${date}`),
       api(`/api/meals?date=${date}`),
       api(`/api/workouts?date=${date}`),
-      api(`/api/stats?date=${date}`)
+      api(`/api/stats?date=${date}`),
+      api(`/api/recovery?date=${date}`)
     ]);
     setDashboard(dashboardData);
     setPlans(planData);
@@ -56,6 +140,7 @@ function App() {
     setMeals(mealData);
     setWorkouts(workoutData);
     setStats(statData);
+    setRecovery(recoveryData);
   }
 
   function showToast(message) {
@@ -87,7 +172,7 @@ function App() {
           </label>
         </header>
 
-        {activeView === "dashboard" && <Dashboard data={dashboard} />}
+        {activeView === "dashboard" && <Dashboard data={dashboard} recovery={recovery} />}
         {activeView === "plans" && <Plans plans={plans} />}
         {activeView === "checkin" && (
           <Checkin
@@ -103,7 +188,16 @@ function App() {
         {activeView === "workouts" && (
           <Workouts date={currentDate} workouts={workouts} reload={() => loadAll(currentDate)} showToast={showToast} />
         )}
-        {activeView === "stats" && <Stats stats={stats} />}
+        {activeView === "coach" && (
+          <CoachHub
+            dashboard={dashboard}
+            stats={stats}
+            recovery={recovery}
+            meals={meals}
+            workouts={workouts}
+          />
+        )}
+        {activeView === "stats" && <Stats stats={stats} recovery={recovery} />}
       </main>
       {toast && <div className="toast show">{toast}</div>}
     </div>
@@ -135,14 +229,14 @@ function Sidebar({ activeView, setActiveView }) {
   );
 }
 
-function Dashboard({ data }) {
+function Dashboard({ data, recovery }) {
   if (!data) return <Panel title="加载中">正在读取本地 SQLite 数据。</Panel>;
   const stage = data.stage;
   const actions = [
     stage ? `训练重点：${stage.training_focus}` : "选择计划日期",
     "每餐保证蛋白质：鸡蛋、鱼肉、豆腐、瘦肉优先",
     "晚餐主食减量，土豆、米饭、馒头不要同餐叠加",
-    "记录体重、腰围、步数和睡眠，方便统计趋势"
+    recovery ? `恢复建议：${riskLabel(recovery.risk_level)}，${recovery.advice}` : "记录 RPE 和训练时长，生成恢复建议"
   ];
   return (
     <section>
@@ -165,14 +259,20 @@ function Dashboard({ data }) {
         <Metric label="当前体重" value={metric(data.weight_kg, "kg")} />
         <Metric label="当前腰围" value={metric(data.waist_cm, "cm")} />
         <Metric label="连续打卡" value={`${data.streak} 天`} />
-        <Metric label="今日热量" value={`${data.today_calories} kcal`} />
+        <Metric label="恢复风险" value={recovery ? riskLabel(recovery.risk_level) : "待记录"} />
       </div>
       <div className="panel-grid">
-        <Panel title="今日行动" subtitle="按 MVP 数据实时变化">
+        <Panel title="今日行动" subtitle="按真实记录动态更新">
           <ul className="action-list">{actions.map((item) => <li key={item}>{item}</li>)}</ul>
         </Panel>
-        <Panel title="本周复盘" subtitle="基于真实记录">
+        <Panel title="本周复盘" subtitle="训练 + 饮食 + 围度">
           <p className="summary">{data.stats.summary}</p>
+          {recovery && (
+            <div className="coach-note">
+              <strong>恢复教练</strong>
+              <span>{recovery.advice}</span>
+            </div>
+          )}
         </Panel>
       </div>
     </section>
@@ -421,7 +521,96 @@ function Workouts({ date, workouts, reload, showToast }) {
   );
 }
 
-function Stats({ stats }) {
+function CoachHub({ dashboard, stats, recovery, meals, workouts }) {
+  return (
+    <section className="coach-page">
+      <Panel title="多 Agent 并行工作看板" subtitle="总 A 分发任务，子 Agent 分组开发，总 A 统一验收">
+        <div className="agent-board">
+          {agentWorkflow.map((agent) => (
+            <article className="agent-card" key={agent.name}>
+              <span className="status-pill">{agent.status}</span>
+              <h4>{agent.name}：{agent.role}</h4>
+              <p>{agent.standard}</p>
+            </article>
+          ))}
+        </div>
+      </Panel>
+
+      <Panel title="4 个专业扩展点" subtitle="训练、营养、围度、复盘">
+        <div className="extension-grid">
+          {professionalExtensions.map((item) => (
+            <article className="extension-card" key={item.id}>
+              <span>{item.owner}</span>
+              <h4>{item.title}</h4>
+              <p>{item.goal}</p>
+              <small>验收：{item.acceptance}</small>
+            </article>
+          ))}
+        </div>
+      </Panel>
+
+      <div className="panel-grid">
+        <Panel title="恢复风险评估" subtitle="A1 接口 /api/recovery">
+          <div className="mini-kpi">
+            <div><strong>{recovery?.total_minutes ?? 0}</strong><span>7 天训练分钟</span></div>
+            <div><strong>{recovery?.average_rpe ?? 0}</strong><span>平均 RPE</span></div>
+            <div><strong>{recovery?.high_rpe_days ?? 0}</strong><span>高 RPE 天数</span></div>
+          </div>
+          <div className="coach-note">
+            <strong>{recovery ? riskLabel(recovery.risk_level) : "待评估"}</strong>
+            <span>{recovery?.advice || "记录训练时长和 RPE 后生成恢复建议。"}</span>
+          </div>
+        </Panel>
+
+        <Panel title="身体围度目标" subtitle="减脂看腰围，也看训练执行">
+          <div className="mini-kpi">
+            <div><strong>{metric(dashboard?.weight_kg, "kg")}</strong><span>当前体重</span></div>
+            <div><strong>{metric(dashboard?.waist_cm, "cm")}</strong><span>当前腰围</span></div>
+            <div><strong>{stats?.completion_rate ?? 0}%</strong><span>本周完成率</span></div>
+          </div>
+          <p className="summary">8 月 26 日前优先看腰围、训练频率和饮食记录稳定性。体重短期波动正常，腰围连续下降更能说明减脂有效。</p>
+        </Panel>
+      </div>
+
+      <Panel title="减脂餐模板" subtitle="A2 营养模板，基于家庭常见食材">
+        <div className="template-grid">
+          {MEAL_TEMPLATES.map((template) => (
+            <article className="template-card" key={template.title}>
+              <span>{mealLabel(template.mealType)}</span>
+              <h4>{template.title}</h4>
+              <p>{template.ingredients.join("、")}</p>
+              <small>{template.macroFocus}</small>
+              <p className="template-tip">{template.tip}</p>
+            </article>
+          ))}
+        </div>
+      </Panel>
+
+      <div className="panel-grid">
+        <Panel title="补充采购清单" subtitle="让减脂餐更容易执行">
+          <div className="shopping-grid">
+            {Object.entries(SHOPPING_LIST).map(([group, items]) => (
+              <div className="shopping-group" key={group}>
+                <strong>{categoryLabel(group)}</strong>
+                <ul>{items.map((item) => <li key={item}>{item}</li>)}</ul>
+              </div>
+            ))}
+          </div>
+        </Panel>
+        <Panel title="阶段复盘建议" subtitle="真实数据驱动">
+          <p className="summary">{stats?.summary || "记录训练和饮食后生成阶段复盘。"}</p>
+          <ul className="action-list">
+            <li>今天已记录饮食 {meals.length} 条，训练 {workouts.length} 条。</li>
+            <li>本周训练完成率 {stats?.completion_rate ?? 0}%，目标是稳定达到 75% 以上。</li>
+            <li>下一步优先补齐蛋白质、步数、睡眠和腰围记录。</li>
+          </ul>
+        </Panel>
+      </div>
+    </section>
+  );
+}
+
+function Stats({ stats, recovery }) {
   if (!stats) return <Panel title="加载中">正在读取统计数据。</Panel>;
   return (
     <section>
@@ -429,7 +618,7 @@ function Stats({ stats }) {
         <Metric label="本周训练" value={`${stats.workout_days} 次`} />
         <Metric label="完成率" value={`${stats.completion_rate}%`} />
         <Metric label="连续打卡" value={`${stats.streak} 天`} />
-        <Metric label="零食风险天" value={`${stats.snack_risk_days} 天`} />
+        <Metric label="恢复风险" value={recovery ? riskLabel(recovery.risk_level) : "待记录"} />
       </div>
       <div className="panel-grid">
         <Panel title="热量趋势" subtitle="按天汇总"><LineChart rows={stats.meal_trend} field="calories" unit="kcal" color="#2f7d57" /></Panel>
