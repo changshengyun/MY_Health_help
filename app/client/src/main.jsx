@@ -122,17 +122,19 @@ function App() {
   const [workouts, setWorkouts] = useState([]);
   const [stats, setStats] = useState(null);
   const [recovery, setRecovery] = useState(null);
+  const [foodLibrary, setFoodLibrary] = useState([]);
   const [toast, setToast] = useState("");
 
   async function loadAll(date = currentDate) {
-    const [dashboardData, planData, checkin, mealData, workoutData, statData, recoveryData] = await Promise.all([
+    const [dashboardData, planData, checkin, mealData, workoutData, statData, recoveryData, foodData] = await Promise.all([
       api(`/api/dashboard?date=${date}`),
       api("/api/plans"),
       api(`/api/checkins/${date}`),
       api(`/api/meals?date=${date}`),
       api(`/api/workouts?date=${date}`),
       api(`/api/stats?date=${date}`),
-      api(`/api/recovery?date=${date}`)
+      api(`/api/recovery?date=${date}`),
+      api("/api/food-library")
     ]);
     setDashboard(dashboardData);
     setPlans(planData);
@@ -141,6 +143,7 @@ function App() {
     setWorkouts(workoutData);
     setStats(statData);
     setRecovery(recoveryData);
+    setFoodLibrary(foodData);
   }
 
   function showToast(message) {
@@ -183,7 +186,7 @@ function App() {
           />
         )}
         {activeView === "meals" && (
-          <Meals date={currentDate} meals={meals} reload={() => loadAll(currentDate)} showToast={showToast} />
+          <Meals date={currentDate} meals={meals} foodLibrary={foodLibrary} reload={() => loadAll(currentDate)} showToast={showToast} />
         )}
         {activeView === "workouts" && (
           <Workouts date={currentDate} workouts={workouts} reload={() => loadAll(currentDate)} showToast={showToast} />
@@ -417,7 +420,7 @@ function Checkin({ date, data, reload, showToast }) {
   );
 }
 
-function Meals({ date, meals, reload, showToast }) {
+function Meals({ date, meals, foodLibrary, reload, showToast }) {
   const [mealType, setMealType] = useState("breakfast");
   const [rawText, setRawText] = useState("");
   const totals = useMemo(() => meals.reduce((acc, meal) => ({
@@ -440,39 +443,93 @@ function Meals({ date, meals, reload, showToast }) {
   }
 
   return (
-    <div className="panel-grid wide">
-      <Panel title="饮食记录" subtitle="关键词估算热量" as="form" className="form-panel" onSubmit={saveMeal}>
-        <label>餐次
-          <select value={mealType} onChange={(event) => setMealType(event.target.value)}>
-            <option value="breakfast">早餐</option>
-            <option value="lunch">午餐</option>
-            <option value="dinner">晚餐</option>
-            <option value="snack">加餐</option>
-          </select>
-        </label>
-        <label>吃了什么
-          <textarea value={rawText} placeholder="例如：小米粥一碗，鸡蛋两个，面包一片" onChange={(event) => setRawText(event.target.value)} />
-        </label>
-        <button className="primary" type="submit">分析并保存</button>
-      </Panel>
-      <Panel title="当日饮食分析" subtitle="估算值">
-        <div className="meal-total">
-          <div><strong>{totals.calories.toFixed(0)}</strong><small> kcal</small></div>
-          <div><strong>{totals.protein.toFixed(1)}</strong><small> 蛋白</small></div>
-          <div><strong>{totals.carbs.toFixed(1)}</strong><small> 碳水</small></div>
-          <div><strong>{totals.fat.toFixed(1)}</strong><small> 脂肪</small></div>
+    <section className="meals-page">
+      <div className="meal-hero">
+        <div>
+          <p className="eyebrow">饮食热量分析</p>
+          <h2>先记录，再解释怎么算出来</h2>
+          <p>当前版本用本地食物库和默认份量估算，适合做减脂趋势判断，不当作医学级精确营养报告。</p>
         </div>
-        <div className="record-list">
-          {meals.length ? meals.map((meal) => (
-            <article className="record" key={meal.id}>
-              <strong>{mealLabel(meal.meal_type)}：{meal.raw_text}</strong>
-              <small>{meal.calories} kcal / 蛋白 {meal.protein_g}g / 碳水 {meal.carbs_g}g / 脂肪 {meal.fat_g}g</small>
-              <p>{meal.advice}</p>
-            </article>
-          )) : <p className="summary">今天还没有饮食记录。</p>}
+        <div className="meal-hero-kpi">
+          <strong>{totals.calories.toFixed(0)}</strong>
+          <span>今日估算 kcal</span>
         </div>
-      </Panel>
-    </div>
+      </div>
+
+      <div className="panel-grid wide">
+        <Panel title="饮食记录" subtitle="关键词估算热量" as="form" className="form-panel" onSubmit={saveMeal}>
+          <label>餐次
+            <select value={mealType} onChange={(event) => setMealType(event.target.value)}>
+              <option value="breakfast">早餐</option>
+              <option value="lunch">午餐</option>
+              <option value="dinner">晚餐</option>
+              <option value="snack">加餐</option>
+            </select>
+          </label>
+          <label>吃了什么
+            <textarea value={rawText} placeholder="例如：小米粥一碗，鸡蛋两个，面包一片" onChange={(event) => setRawText(event.target.value)} />
+          </label>
+          <button className="primary" type="submit">分析并保存</button>
+        </Panel>
+        <Panel title="当日饮食分析" subtitle="估算值">
+          <div className="meal-total">
+            <div><strong>{totals.calories.toFixed(0)}</strong><small> kcal</small></div>
+            <div><strong>{totals.protein.toFixed(1)}</strong><small> 蛋白</small></div>
+            <div><strong>{totals.carbs.toFixed(1)}</strong><small> 碳水</small></div>
+            <div><strong>{totals.fat.toFixed(1)}</strong><small> 脂肪</small></div>
+          </div>
+          <div className="record-list">
+            {meals.length ? meals.map((meal) => (
+              <article className="record" key={meal.id}>
+                <strong>{mealLabel(meal.meal_type)}：{meal.raw_text}</strong>
+                <small>{meal.calories} kcal / 蛋白 {meal.protein_g}g / 碳水 {meal.carbs_g}g / 脂肪 {meal.fat_g}g</small>
+                <p>{meal.advice}</p>
+              </article>
+            )) : <p className="summary">今天还没有饮食记录。</p>}
+          </div>
+        </Panel>
+      </div>
+
+      <CalorieExplainer foodLibrary={foodLibrary} />
+    </section>
+  );
+}
+
+function CalorieExplainer({ foodLibrary }) {
+  const previewFoods = foodLibrary.slice(0, 8);
+  return (
+    <Panel title="卡路里是怎么算出来的" subtitle="代码依据：server.py / analyze_meal_text">
+      <div className="formula-board">
+        <article>
+          <span className="status-pill">步骤 1</span>
+          <h4>匹配食物</h4>
+          <p>把你输入的文字去掉空格，然后在本地 `food_library` 里匹配食物名和别名，比如“鸡蛋”“蛋”“炖鱼”“鱼”。</p>
+        </article>
+        <article>
+          <span className="status-pill">步骤 2</span>
+          <h4>判断份量</h4>
+          <p>识别“半、两个、三份、4个”等简单数量词；识别不到就使用默认克重，比如鸡蛋 55g、米饭 150g。</p>
+        </article>
+        <article>
+          <span className="status-pill">步骤 3</span>
+          <h4>按 100g 换算</h4>
+          <p>公式：食物热量 = 估算克重 × 每 100g 热量 / 100。蛋白质、碳水、脂肪也是同样公式。</p>
+        </article>
+        <article>
+          <span className="status-pill">步骤 4</span>
+          <h4>给建议</h4>
+          <p>如果蛋白质低于 20g、碳水高于 90g、脂肪高于 30g，就提示补蛋白、控主食或少油。</p>
+        </article>
+      </div>
+      <div className="food-reference">
+        {previewFoods.map((food) => (
+          <div key={food.name}>
+            <strong>{food.name}</strong>
+            <span>默认 {food.default_amount_g}g / {food.calories_per_100g} kcal per 100g</span>
+          </div>
+        ))}
+      </div>
+    </Panel>
   );
 }
 

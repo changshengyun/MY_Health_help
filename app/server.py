@@ -472,6 +472,16 @@ class FitnessHandler(SimpleHTTPRequestHandler):
                 if path == "/api/plans":
                     rows = conn.execute("SELECT * FROM weekly_plans ORDER BY week_index").fetchall()
                     return self.send_json(rows_to_dicts(rows))
+                if path == "/api/food-library":
+                    rows = conn.execute(
+                        """
+                        SELECT name, unit, default_amount_g, calories_per_100g,
+                               protein_per_100g, carbs_per_100g, fat_per_100g
+                        FROM food_library
+                        ORDER BY id
+                        """
+                    ).fetchall()
+                    return self.send_json(rows_to_dicts(rows))
                 if path == "/api/tasks":
                     rows = conn.execute("SELECT * FROM custom_tasks WHERE active = 1 ORDER BY id").fetchall()
                     return self.send_json(rows_to_dicts(rows))
