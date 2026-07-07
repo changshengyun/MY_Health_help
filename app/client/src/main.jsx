@@ -123,10 +123,12 @@ function App() {
   const [stats, setStats] = useState(null);
   const [recovery, setRecovery] = useState(null);
   const [foodLibrary, setFoodLibrary] = useState([]);
+  const [aiStatus, setAiStatus] = useState(null);
+  const [aiCoach, setAiCoach] = useState(null);
   const [toast, setToast] = useState("");
 
   async function loadAll(date = currentDate) {
-    const [dashboardData, planData, checkin, mealData, workoutData, statData, recoveryData, foodData] = await Promise.all([
+    const [dashboardData, planData, checkin, mealData, workoutData, statData, recoveryData, foodData, aiStatusData, aiCoachData] = await Promise.all([
       api(`/api/dashboard?date=${date}`),
       api("/api/plans"),
       api(`/api/checkins/${date}`),
@@ -134,7 +136,9 @@ function App() {
       api(`/api/workouts?date=${date}`),
       api(`/api/stats?date=${date}`),
       api(`/api/recovery?date=${date}`),
-      api("/api/food-library")
+      api("/api/food-library"),
+      api("/api/ai-status"),
+      api(`/api/ai-coach?date=${date}`)
     ]);
     setDashboard(dashboardData);
     setPlans(planData);
@@ -144,6 +148,8 @@ function App() {
     setStats(statData);
     setRecovery(recoveryData);
     setFoodLibrary(foodData);
+    setAiStatus(aiStatusData);
+    setAiCoach(aiCoachData);
   }
 
   function showToast(message) {
@@ -186,7 +192,7 @@ function App() {
           />
         )}
         {activeView === "meals" && (
-          <Meals date={currentDate} meals={meals} foodLibrary={foodLibrary} reload={() => loadAll(currentDate)} showToast={showToast} />
+          <Meals date={currentDate} meals={meals} foodLibrary={foodLibrary} aiStatus={aiStatus} reload={() => loadAll(currentDate)} showToast={showToast} />
         )}
         {activeView === "workouts" && (
           <Workouts date={currentDate} workouts={workouts} reload={() => loadAll(currentDate)} showToast={showToast} />
@@ -198,6 +204,8 @@ function App() {
             recovery={recovery}
             meals={meals}
             workouts={workouts}
+            aiStatus={aiStatus}
+            aiCoach={aiCoach}
           />
         )}
         {activeView === "stats" && <Stats stats={stats} recovery={recovery} />}
@@ -420,7 +428,7 @@ function Checkin({ date, data, reload, showToast }) {
   );
 }
 
-function Meals({ date, meals, foodLibrary, reload, showToast }) {
+function Meals({ date, meals, foodLibrary, aiStatus, reload, showToast }) {
   const [mealType, setMealType] = useState("breakfast");
   const [rawText, setRawText] = useState("");
   const totals = useMemo(() => meals.reduce((acc, meal) => ({
@@ -456,6 +464,7 @@ function Meals({ date, meals, foodLibrary, reload, showToast }) {
         </div>
       </div>
 
+      <AiStatusPanel aiStatus={aiStatus} />
       <div className="panel-grid wide">
         <Panel title="饮食记录" subtitle="关键词估算热量" as="form" className="form-panel" onSubmit={saveMeal}>
           <label>餐次
@@ -492,6 +501,31 @@ function Meals({ date, meals, foodLibrary, reload, showToast }) {
 
       <CalorieExplainer foodLibrary={foodLibrary} />
     </section>
+  );
+}
+
+function AiStatusPanel({ aiStatus }) {
+  const enabled = Boolean(aiStatus?.enabled);
+  return (
+    <Panel
+      title="AI 大模型分析层"
+      subtitle={enabled ? "已接入 Llama / OpenAI-compatible Chat Completions" : "等待 .env 配置 API Key"}
+      className="ai-panel"
+    >
+      <div className="ai-panel-head">
+        <span className={`ai-badge ${enabled ? "on" : "off"}`}>{enabled ? "LLM 已启用" : "规则兜底中"}</span>
+        <span>{aiStatus?.model || "meta-llama/Llama-3.3-70B-Instruct"}</span>
+      </div>
+      <p>
+        饮食热量仍由本地食物库先做可解释估算，再把原始输入、匹配食物和宏量营养交给大模型做建议。
+        未配置 API Key 时不会联网，会继续使用本地规则。
+      </p>
+      {!enabled && (
+        <code className="env-hint">
+          app/.env: LLM_API_KEY=你的Key，LLM_BASE_URL=服务商/v1，LLM_MODEL=你的Llama或Flash模型名
+        </code>
+      )}
+    </Panel>
   );
 }
 
@@ -578,9 +612,26 @@ function Workouts({ date, workouts, reload, showToast }) {
   );
 }
 
-function CoachHub({ dashboard, stats, recovery, meals, workouts }) {
+function AiCoachPanel({ aiStatus, aiCoach }) {
+  const enabled = Boolean(aiStatus?.enabled);
+  const source = aiCoach?.source === "llm" ? "大模型建议" : "本地规则兜底";
+  return (
+    <Panel title="Llama 教练复盘" subtitle="读取本地数据库后生成建议" className="ai-panel">
+      <div className="ai-panel-head">
+        <span className={`ai-badge ${enabled ? "on" : "off"}`}>{source}</span>
+        <span>{aiCoach?.model || aiStatus?.model || "meta-llama/Llama-3.3-70B-Instruct"}</span>
+      </div>
+      <p>{aiCoach?.advice || "正在等待打卡、饮食和训练记录。"}</p>
+      {aiCoach?.message && <small className="ai-message">{aiCoach.message}</small>}
+    </Panel>
+  );
+}
+
+function CoachHub({ dashboard, stats, recovery, meals, workouts, aiStatus, aiCoach }) {
   return (
     <section className="coach-page">
+      <AiCoachPanel aiStatus={aiStatus} aiCoach={aiCoach} />
+
       <Panel title="多 Agent 并行工作看板" subtitle="总 A 分发任务，子 Agent 分组开发，总 A 统一验收">
         <div className="agent-board">
           {agentWorkflow.map((agent) => (

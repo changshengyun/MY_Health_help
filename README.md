@@ -11,6 +11,7 @@ The current implementation includes:
 - Daily check-ins.
 - Custom tasks.
 - Meal logging and calorie estimation.
+- Optional LLM meal and coach advice through `.env`.
 - Workout logging.
 - Statistics dashboard.
 
@@ -33,6 +34,16 @@ npm.cmd install --cache .\.npm-cache
 npm.cmd run build
 python server.py
 ```
+
+Optional AI config:
+
+```powershell
+cd D:\DevEnv\Work\health-assistant\app
+copy .env.example .env
+notepad .env
+```
+
+Fill `LLM_API_KEY`, `LLM_BASE_URL`, and `LLM_MODEL` for any OpenAI-compatible Chat Completions provider. `.env` is ignored by Git.
 
 Open:
 

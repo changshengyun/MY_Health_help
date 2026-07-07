@@ -3,6 +3,8 @@ import os
 import re
 import sqlite3
 import sys
+import urllib.error
+import urllib.request
 from datetime import date, datetime, timedelta
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -13,6 +15,115 @@ BASE_DIR = Path(__file__).resolve().parent
 CLIENT_DIST_DIR = BASE_DIR / "client" / "dist"
 DATA_DIR = BASE_DIR / "data"
 DB_PATH = DATA_DIR / "fitness-assistant.sqlite"
+ENV_PATH = BASE_DIR / ".env"
+
+
+def load_env_file():
+    if not ENV_PATH.exists():
+        return
+    for raw_line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+load_env_file()
+
+
+DEFAULT_LLM_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_LLM_MODEL = "meta-llama/Llama-3.3-70B-Instruct"
+
+NUTRITION_SYSTEM_PROMPT = """
+你是一个谨慎的中文健身营养助手，服务对象是身高174cm、体重约71kg、以减脂和新手恢复训练为目标的用户。
+你的任务是基于用户输入的饮食文本、系统按本地食物库估算出的热量和宏量营养，给出可执行建议。
+规则：
+1. 不做疾病诊断，不给极端节食、断食、药物或补剂依赖建议。
+2. 承认估算误差，优先指出蛋白质、主食、蔬菜、油脂、零食和晚餐控制问题。
+3. 建议必须贴合用户家里常见食材：鸡蛋、鱼肉、猪瘦肉、豆腐、米饭、小米粥、土豆、茄子、辣椒、蔬菜、馒头、花卷、西瓜。
+4. 输出中文，控制在120字以内，给出“这一餐判断”和“下一餐怎么调”。
+""".strip()
+
+COACH_SYSTEM_PROMPT = """
+你是一个谨慎的中文健身教练和营养复盘助手，目标是帮助新手从2026-07-06到2026-08-26完成减脂、瘦肚子瘦腿、腹肌和肩背手臂训练。
+你会读取本地SQLite里的真实打卡、饮食、训练、恢复和统计数据，然后给出下一步建议。
+规则：
+1. 不做医疗诊断，不承诺局部减脂；把“瘦肚子瘦腿”解释为总体减脂加力量训练塑形。
+2. 每周训练频率以3-4次为边界，不建议新手突然加量。
+3. 优先关注：蛋白质是否足够、晚餐主食是否叠加、零食是否失控、训练是否覆盖肩/背/手臂/核心、恢复风险。
+4. 输出中文，分成“本周判断”“今天最该做”“饮食调整”“训练调整”，总字数不超过260字。
+""".strip()
+
+
+def llm_api_key():
+    return os.environ.get("LLM_API_KEY") or os.environ.get("AI_API_KEY") or ""
+
+
+def llm_base_url():
+    return os.environ.get("LLM_BASE_URL", DEFAULT_LLM_BASE_URL).rstrip("/")
+
+
+def llm_model():
+    return os.environ.get("LLM_MODEL", DEFAULT_LLM_MODEL)
+
+
+def ai_status_payload():
+    return {
+        "enabled": bool(llm_api_key()),
+        "base_url": llm_base_url(),
+        "model": llm_model(),
+        "env_path": str(ENV_PATH),
+    }
+
+
+def call_llm(messages, temperature=0.25, max_tokens=520):
+    key = llm_api_key()
+    if not key:
+        raise RuntimeError("LLM_API_KEY is not configured")
+
+    timeout = int(os.environ.get("LLM_TIMEOUT_SECONDS", "20"))
+    payload = json.dumps(
+        {
+            "model": llm_model(),
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{llm_base_url()}/chat/completions",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:220]
+        raise RuntimeError(f"LLM HTTP {exc.code}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"LLM network error: {exc.reason}") from exc
+
+    choices = body.get("choices") or []
+    if not choices:
+        raise RuntimeError("LLM response has no choices")
+    message = choices[0].get("message") or {}
+    content = message.get("content") or ""
+    return content.strip()
+
+
+def safe_ai_error(exc):
+    text = str(exc)
+    key = llm_api_key()
+    if key:
+        text = text.replace(key, "***")
+    return text[:240]
 
 
 def now_iso():
@@ -304,6 +415,110 @@ def analyze_meal_text(conn, raw_text):
     }
 
 
+def generate_ai_meal_advice(raw_text, analysis):
+    if not llm_api_key():
+        return None
+    user_prompt = {
+        "raw_text": raw_text,
+        "rule_estimate": {
+            "calories": analysis["calories"],
+            "protein_g": analysis["protein_g"],
+            "carbs_g": analysis["carbs_g"],
+            "fat_g": analysis["fat_g"],
+            "matched_items": analysis["matched_items"],
+            "fallback_advice": analysis["advice"],
+        },
+        "calculation_note": "本地规则用：估算克重 * 每100g营养值 / 100。若食物或克重不明确，请指出不确定性。",
+    }
+    return call_llm(
+        [
+            {"role": "system", "content": NUTRITION_SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps(user_prompt, ensure_ascii=False)},
+        ],
+        temperature=0.2,
+        max_tokens=300,
+    )
+
+
+def latest_rows(conn, table, target_date, limit=8):
+    allowed = {"meals", "workout_logs", "daily_checkins"}
+    if table not in allowed:
+        return []
+    rows = conn.execute(
+        f"SELECT * FROM {table} WHERE date <= ? ORDER BY date DESC, id DESC LIMIT ?",
+        (target_date, limit),
+    ).fetchall()
+    return rows_to_dicts(rows)
+
+
+def build_ai_context(conn, target_date):
+    return {
+        "date": target_date,
+        "current_stage": current_stage(conn, target_date),
+        "stats": get_stats(conn, target_date),
+        "recovery": get_recovery(conn, target_date),
+        "recent_checkins": latest_rows(conn, "daily_checkins", target_date, 7),
+        "recent_meals": latest_rows(conn, "meals", target_date, 10),
+        "recent_workouts": latest_rows(conn, "workout_logs", target_date, 10),
+        "user_profile": {
+            "height_cm": 174,
+            "weight_kg": 71,
+            "goal": "减脂、瘦肚子瘦腿、练腹肌、肩背和肱二头三头",
+            "training_frequency": "每周3到4次",
+            "equipment": ["小哑铃", "瑜伽垫", "臂力棒"],
+        },
+    }
+
+
+def fallback_coach_advice(conn, target_date):
+    stats = get_stats(conn, target_date)
+    recovery = get_recovery(conn, target_date)
+    stage = current_stage(conn, target_date)
+    parts = []
+    if stage:
+        parts.append(f"当前阶段：{stage['title']}，训练重点是{stage['training_focus']}。")
+    parts.append(stats["summary"])
+    parts.append(recovery["advice"])
+    return " ".join(parts)
+
+
+def generate_ai_coach_advice(conn, target_date):
+    fallback = fallback_coach_advice(conn, target_date)
+    if not llm_api_key():
+        return {
+            "enabled": False,
+            "source": "fallback",
+            "model": llm_model(),
+            "advice": fallback,
+            "message": f"未检测到 LLM_API_KEY，请在 {ENV_PATH} 配置后启用大模型复盘。",
+        }
+    try:
+        context = build_ai_context(conn, target_date)
+        advice = call_llm(
+            [
+                {"role": "system", "content": COACH_SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
+            ],
+            temperature=0.25,
+            max_tokens=620,
+        )
+        return {
+            "enabled": True,
+            "source": "llm",
+            "model": llm_model(),
+            "advice": advice,
+            "message": "已使用大模型结合本地真实记录生成建议。",
+        }
+    except Exception as exc:
+        return {
+            "enabled": False,
+            "source": "fallback",
+            "model": llm_model(),
+            "advice": fallback,
+            "message": f"AI 分析暂不可用，已使用本地规则兜底：{safe_ai_error(exc)}",
+        }
+
+
 def get_stats(conn, target_date):
     week_start, week_end = week_bounds(target_date)
     workout_days = conn.execute(
@@ -469,6 +684,8 @@ class FitnessHandler(SimpleHTTPRequestHandler):
             with get_db() as conn:
                 if path == "/api/health":
                     return self.send_json({"ok": True, "database": str(DB_PATH), "time": now_iso()})
+                if path == "/api/ai-status":
+                    return self.send_json(ai_status_payload())
                 if path == "/api/plans":
                     rows = conn.execute("SELECT * FROM weekly_plans ORDER BY week_index").fetchall()
                     return self.send_json(rows_to_dicts(rows))
@@ -513,6 +730,9 @@ class FitnessHandler(SimpleHTTPRequestHandler):
                 if path == "/api/recovery":
                     target = query.get("date", [date.today().isoformat()])[0]
                     return self.send_json(get_recovery(conn, target))
+                if path == "/api/ai-coach":
+                    target = query.get("date", [date.today().isoformat()])[0]
+                    return self.send_json(generate_ai_coach_advice(conn, target))
                 if path == "/api/dashboard":
                     target = query.get("date", [date.today().isoformat()])[0]
                     week_start, week_end = week_bounds(target)
@@ -612,6 +832,13 @@ class FitnessHandler(SimpleHTTPRequestHandler):
                     meal_type = payload.get("meal_type") or "breakfast"
                     raw_text = payload.get("raw_text", "").strip()
                     analysis = analyze_meal_text(conn, raw_text)
+                    try:
+                        ai_advice = generate_ai_meal_advice(raw_text, analysis)
+                    except Exception as exc:
+                        ai_advice = f"AI 分析暂不可用，已使用本地规则兜底：{safe_ai_error(exc)}"
+                    if ai_advice:
+                        analysis["ai_advice"] = ai_advice
+                        analysis["advice"] = ai_advice
                     cur = conn.execute(
                         """
                         INSERT INTO meals

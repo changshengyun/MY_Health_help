@@ -408,6 +408,61 @@ button:active { transform: translateY(0); }
   line-height: 1.65;
 }
 
+.ai-panel {
+  margin-bottom: 18px;
+  border-color: rgba(47, 102, 144, 0.28);
+  background: linear-gradient(180deg, #fff, #f4f8f6);
+}
+
+.ai-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.ai-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.ai-badge.on {
+  background: #e8f3ed;
+  color: var(--green-dark);
+}
+
+.ai-badge.off {
+  background: #fff2df;
+  color: #8a5a16;
+}
+
+.ai-message {
+  display: block;
+  margin-top: 10px;
+  color: var(--muted);
+}
+
+.env-hint {
+  display: block;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #18251f;
+  color: #f5f1e8;
+  white-space: pre-wrap;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -524,6 +579,7 @@ button:active { transform: translateY(0); }
   .sidebar { position: static; width: auto; }
   .app { margin-left: 0; padding: 18px; }
   .topbar, .hero, .meal-hero, .panel-title { flex-direction: column; align-items: stretch; }
+  .ai-panel-head { flex-direction: column; align-items: flex-start; }
   .metric-grid, .panel-grid, .panel-grid.wide, .form-grid, .checkbox-row, .meal-total, .extension-grid, .template-grid, .agent-board, .mini-kpi, .shopping-grid, .formula-board, .food-reference { grid-template-columns: 1fr; }
   .inline-form { grid-template-columns: 1fr; }
   .hero-score { width: 120px; height: 120px; }
